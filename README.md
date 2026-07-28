@@ -1,0 +1,149 @@
+# BO2 Emblem Studio
+
+Complete toolkit for Call of Duty: Black Ops II / Plutonium T6 emblem editing, creation, and conversion.
+
+## Features
+
+- **Full Parser/Serializer** - Read/write `.emblem` and `.bin` files (1408 bytes = 32 layers × 44 bytes)
+- **Pixel-Perfect Renderer** - 260+ reference shapes from reverse engineering
+- **Image → Emblem Converter** - Import PNG, JPG, WebP, BMP, SVG
+- **Layer Optimizer** - Reduce to 32-layer limit with 95%+ fidelity
+- **AI Text-to-Emblem Generator** - Create emblems from prompts like "cat with sunglasses"
+- **Plutonium T6 Auto-Exporter** - One-click copy to `%localappdata%\Plutonium\storage\t6\players\`
+- **Modern PySide6 GUI** - Photoshop-style editor with drag-drop layers
+
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+### Requirements
+- Python 3.9+
+- Pillow >= 9.0
+- NumPy >= 1.21
+- SciPy >= 1.7
+- PySide6 >= 6.4 (for GUI)
+
+### Optional
+- `cairosvg` for SVG support
+
+## Quick Start
+
+### Command Line
+```python
+from bo2_emblem import load_emblem, save_emblem, render_emblem, export_to_plutonium
+
+# Load existing emblem
+layers = load_emblem("1#emblem.emblem")
+
+# Render preview
+render_emblem(layers, size=512, output_path="preview.png")
+
+# Create new emblem
+from bo2_emblem import EmblemLayer
+layers = [
+    EmblemLayer(index=0, shape_id=137, r=1.0, g=0.0, b=0.0),  # Red Half Circle
+    EmblemLayer(index=1, shape_id=217, r=0.0, g=1.0, b=0.0),  # Green Letter A
+]
+save_emblem("my_emblem.emblem", layers)
+
+# Export to Plutonium (auto-copies to game directory)
+export_to_plutonium(layers, slot=1)
+```
+
+### GUI Application
+```bash
+python -m bo2_emblem.gui
+```
+
+Or run directly:
+```python
+from bo2_emblem.gui import main
+main()
+```
+
+## Architecture
+
+```
+bo2_emblem/
+├── parser.py       # EmblemParser, EmblemLayer
+├── serializer.py   # EmblemSerializer
+├── renderer.py     # EmblemRenderer (pixel-perfect)
+├── importer.py     # ImageImporter (PNG/JPG/WebP/BMP/SVG → layers)
+├── exporter.py     # EmblemExporter (Plutonium auto-copy)
+├── optimizer.py    # EmblemOptimizer (32-layer limit)
+├── ai.py           # EmblemAIGenerator (text → emblem)
+├── shape_map.py    # 260+ shape IDs with categories
+└── gui/            # PySide6 editor application
+```
+
+## Shape Database
+
+260+ confirmed shape IDs organized by category:
+
+| Category | IDs | Description |
+|----------|-----|-------------|
+| **tools** | 137-197 | Basic shapes (circles, squares, stars, etc.) |
+| **type** | 217-252 | Letters A-Z, Numbers 0-9 |
+| **emblems** | 38-136, 253-259 | Pre-made game icons (106 total) |
+| **ranks** | 198-216 | Military ranks (19) |
+| **gear** | 0-37, 260 | Weapon/perk qualifications (39) |
+
+## File Format
+
+BO2 emblems are 1408-byte binary blobs:
+
+```
+32 layers × 44 bytes = 1408 bytes
+
+Layer structure (44 bytes):
+- uint16 shapeId (0xFFFF = empty)
+- uint16 padding
+- float32 r, g, b, a (0.0-1.0)
+- float32 posX, posY (fraction from center, +Y = DOWN)
+- float32 scaleX, scaleY (log2 scale: true_scale = 2^value)
+- float32 rotation (degrees, clockwise)
+- uint8 outlined (bool)
+- uint8 flipped (bool)
+- uint16 padding
+```
+
+## Reverse Engineering Sources
+
+This project is based on extensive reverse engineering from:
+
+- **505e06b2/Black-Ops-2-Emblem-Editor** - Web-based editor emulator
+- **alexkotr1/bo2-emblem-toolkit** - Proxy tool with complete parser/renderer
+- **olie304/CallOfDutyEmblemSpecs** - Format specification document
+- **ogarsan/Black-Ops-2-Emblem-Master** - AI-powered fork
+- **davideloi55-prog/BO2-Emblem-Generator** - Image-to-emblem converter
+
+All sources are cloned in `research/` directory.
+
+## Documentation
+
+See `docs/reverse_engineering.md` for complete format specification.
+
+## Testing
+
+```bash
+python -m pytest tests/ -v
+```
+
+## License
+
+MIT License - see LICENSE file.
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Add tests
+4. Submit PR
+
+## Credits
+
+Reverse engineering by the BO2/Plutonium modding community. Special thanks to:
+- 505e06b2, alexkotr1, olie304, ogarsan, davideloi55-prog
+- Plutonium T6 team for the platform
