@@ -6,8 +6,16 @@ Main application window with PySide6.
 
 import sys
 import os
+import json
+import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Dict, Optional
+import requests
+import asyncio
+from bo2_emblem.ai_hermes import (
+    EmblemConcept, HermesConfig, AIProvider, generate_emblem_async
+)
+from bo2_emblem.parser import EmblemLayer
 
 try:
     from PySide6.QtWidgets import (
@@ -423,7 +431,17 @@ if HAS_PYSIDE6:
             self._setup_toolbar()
             self._setup_statusbar()
             
+            # Connect AI signals
+            self.ai_log_signal.connect(self._log_ai)
+            self.ai_test_success_signal.connect(self._test_success)
+            self.ai_test_error_signal.connect(self._test_error)
+            self.ai_generation_complete_signal.connect(self._apply_generated_layers)
+            self.ai_generation_failed_signal.connect(self._generation_failed)
+            
             self._new_emblem()
+            
+            # Load saved AI config
+            self._load_ai_config()
         
         def _setup_ui(self):
             central = QWidget()
@@ -870,6 +888,7 @@ if HAS_PYSIDE6:
                 "vLLM",
                 "Custom (OpenAI Compatible)"
             ])
+            self.ai_provider.currentTextChanged.connect(self._on_provider_changed)
             conn_layout.addRow("Provider:", self.ai_provider)
 
             self.ai_endpoint = QLineEdit()
@@ -1005,47 +1024,59 @@ if HAS_PYSIDE6:
 
             self._log_ai(f"Testing connection to {provider_text} at {endpoint}...")
 
-            import requests
             # Run in thread to avoid blocking UI
             from threading import Thread
             def test():
                 try:
-                    headers = {"Content-Type": "application/json"}
-                    if api_key:
-                        headers["Authorization"] = f"Bearer {api_key}"
-
-                    payload = {
-                        "model": model or "default",
-                        "messages": [{"role": "user", "content": "Test connection"}],
-                        "max_tokens": 10
-                    }
-
+                    # Build URL exactly like HermesClient does
                     base = endpoint.rstrip('/')
-                    if base.endswith('/api/v1') or base.endswith('/v1') or base.endswith('/messages'):
-                        test_url = f"{base}/chat/completions"
-                        if base.endswith('/messages'):
-                            test_url = base
-                    else:
-                        if provider_text == "OpenRouter":
-                            test_url = f"{base}/api/v1/chat/completions"
-                        elif provider_text == "Anthropic (Claude)":
-                            test_url = f"{base}/v1/messages"
+                    if provider_text == "Anthropic (Claude)":
+                        test_url = f"{base}/messages" if base.endswith('/v1') else f"{base}/v1/messages"
+                    elif provider_text == "OpenRouter":
+                        if base.endswith('/api/v1') or base.endswith('/v1'):
+                            test_url = f"{base}/chat/completions"
                         else:
-                            test_url = f"{base}/v1/chat/completions"
+                            test_url = f"{base}/api/v1/chat/completions"
+                    else:
+                        # All OpenAI-compatible: NVIDIA, Ollama, LM Studio, vLLM, OpenAI, Local
+                        test_url = f"{base}/chat/completions" if base.endswith('/v1') else f"{base}/v1/chat/completions"
+
+                    headers = {"Content-Type": "application/json"}
+                    if provider_text == "Anthropic (Claude)":
+                        headers["x-api-key"] = api_key
+                        headers["anthropic-version"] = "2023-06-01"
+                        payload = {
+                            "model": model or "claude-3-haiku-20240307",
+                            "max_tokens": 10,
+                            "messages": [{"role": "user", "content": "say hi"}]
+                        }
+                    else:
+                        if api_key:
+                            headers["Authorization"] = f"Bearer {api_key}"
+                        payload = {
+                            "model": model or "default",
+                            "messages": [{"role": "user", "content": "say hi"}],
+                            "max_tokens": 10
+                        }
+
+                    self.ai_log_signal.emit(f"📡 Testing URL: {test_url}")
 
                     resp = requests.post(
                         test_url,
                         json=payload,
                         headers=headers,
-                        timeout=10
+                        timeout=30
                     )
 
                     if resp.status_code == 200:
                         self.ai_log_signal.emit("✅ Connection successful!")
-                        self.ai_test_success_signal.emit(provider_text, "Connected successfully!")
+                        self.ai_test_success_signal.emit(provider_text, f"Model: {model}\nStatus: 200 OK")
+                        # Auto-save config on successful connection
+                        self._save_ai_config()
                     else:
-                        self.ai_log_signal.emit(f"❌ Connection failed: {resp.status_code} - {resp.text}")
-                        self.ai_test_error_signal.emit(str(resp.status_code), resp.text)
+                        error_text = resp.text[:200]
+                        self.ai_log_signal.emit(f"❌ Connection failed: {resp.status_code} - {error_text}")
+                        self.ai_test_error_signal.emit(str(resp.status_code), error_text)
                 except Exception as e:
                     self.ai_log_signal.emit(f"❌ Error: {str(e)}")
                     self.ai_test_error_signal.emit("Exception", str(e))
@@ -1057,6 +1088,62 @@ if HAS_PYSIDE6:
 
         def _test_error(self, code: str, msg: str):
             QMessageBox.critical(self, "Error", f"Connection test failed ({code}):\n{msg}")
+
+        def _save_ai_config(self):
+            """Save AI configuration to file."""
+            config_path = os.path.join(os.path.expanduser("~"), ".bo2_emblem_studio_ai.json")
+            try:
+                config = {
+                    "provider": self.ai_provider.currentText(),
+                    "endpoint": self.ai_endpoint.text().strip(),
+                    "model": self.ai_model.text().strip(),
+                    "api_key": self.ai_api_key.text().strip(),
+                }
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+                self._log_ai(f"💾 Config saved to {config_path}")
+            except Exception as e:
+                self._log_ai(f"⚠️ Failed to save config: {e}")
+
+        def _load_ai_config(self):
+            """Load AI configuration from file."""
+            config_path = os.path.join(os.path.expanduser("~"), ".bo2_emblem_studio_ai.json")
+            try:
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                    # Find provider index
+                    provider = config.get("provider", "")
+                    idx = self.ai_provider.findText(provider)
+                    if idx >= 0:
+                        self.ai_provider.setCurrentIndex(idx)
+                    self.ai_endpoint.setText(config.get("endpoint", ""))
+                    self.ai_model.setText(config.get("model", ""))
+                    self.ai_api_key.setText(config.get("api_key", ""))
+                    self._log_ai("💾 Loaded saved AI configuration")
+            except Exception as e:
+                self._log_ai(f"⚠️ Failed to load config: {e}")
+
+        def _on_provider_changed(self, provider_text: str):
+            """Auto-fill endpoint when provider changes."""
+            defaults = {
+                "Local (Hermes Agent)": ("http://localhost:8080/v1", "nemotron-3-ultra"),
+                "OpenAI": ("https://api.openai.com/v1", "gpt-4o-mini"),
+                "Anthropic (Claude)": ("https://api.anthropic.com/v1", "claude-3-haiku-20240307"),
+                "Google (Gemini)": ("https://generativelanguage.googleapis.com", "gemini-2.0-flash"),
+                "NVIDIA": ("https://integrate.api.nvidia.com/v1", "meta/llama-3.1-70b-instruct"),
+                "OpenRouter": ("https://openrouter.ai/api/v1", "meta-llama/llama-3.1-8b-instruct"),
+                "Ollama": ("http://localhost:11434/v1", "llama3.1"),
+                "LM Studio": ("http://localhost:1234/v1", ""),
+                "vLLM": ("http://localhost:8000/v1", ""),
+                "Custom (OpenAI Compatible)": ("", ""),
+            }
+            if provider_text in defaults:
+                endpoint, model = defaults[provider_text]
+                if not self.ai_endpoint.text().strip():
+                    self.ai_endpoint.setText(endpoint)
+                if not self.ai_model.text().strip():
+                    self.ai_model.setText(model)
 
         def _generate_ai_hermes(self):
             """Generate emblem using Hermes AI."""
@@ -1081,11 +1168,6 @@ if HAS_PYSIDE6:
             symmetry = self.ai_symmetry.currentText()
             complexity = self.ai_complexity.value()
 
-            import asyncio
-            from bo2_emblem.ai_hermes import (
-                EmblemConcept, HermesConfig, AIProvider, generate_emblem_async
-            )
-            from bo2_emblem.parser import EmblemLayer
             from threading import Thread
 
             def generate():
@@ -1113,7 +1195,8 @@ if HAS_PYSIDE6:
                         api_key=api_key,
                         model=model,
                         temperature=0.7,
-                        max_tokens=4096
+                        max_tokens=4096,
+                        timeout=180
                     )
 
                     concept = EmblemConcept(

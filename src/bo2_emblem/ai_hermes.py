@@ -56,9 +56,9 @@ class EmblemConcept:
     color_scheme: str = "auto"
     symmetry: str = "bilateral"  # bilateral, radial, asymmetric
     complexity: int = 3  # 1-5
+    composition_notes: str = ""
     elements: List[str] = field(default_factory=list)
     color_palette: List[Tuple[float, float, float]] = field(default_factory=list)
-    composition_notes: str = ""
 
 
 @dataclass
