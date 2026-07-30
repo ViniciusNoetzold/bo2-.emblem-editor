@@ -1,0 +1,2 @@
+[console_scripts]
+bo2-emblem-studio = bo2_emblem.gui:main

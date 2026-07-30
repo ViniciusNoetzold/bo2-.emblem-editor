@@ -10,6 +10,7 @@ Features:
 - Image-to-emblem converter (PNG, JPEG, WebP, BMP, SVG)
 - Layer optimizer (reduces to 32 layers with 95%+ fidelity)
 - AI text-to-emblem generator
+- Hermes AI integration for advanced emblem generation
 - Plutonium T6 exporter (auto-copies to game directory)
 - Shape database with 260+ confirmed shape IDs
 - Modern GUI editor (PySide6)
@@ -46,6 +47,7 @@ Modules:
     exporter    - EmblemExporter
     optimizer   - EmblemOptimizer
     ai          - EmblemAIGenerator
+    ai_hermes   - Hermes AI integration
     shape_map   - SHAPE_ID_MAP, lookup functions
 """
 
@@ -56,6 +58,16 @@ from .importer import ImageImporter, import_image_to_emblem, import_image_and_re
 from .exporter import EmblemExporter, export_to_plutonium, list_plutonium_emblems, ExportConfig
 from .optimizer import EmblemOptimizer, optimize_emblem, OptimizerConfig
 from .ai import EmblemAIGenerator, generate_emblem_from_prompt, generate_emblem_complex
+from .ai_hermes import (
+    AIProvider,
+    HermesConfig,
+    EmblemConcept,
+    EmblemPlan,
+    HermesClient,
+    AIConfigManager,
+    generate_emblem,
+    generate_emblem_async,
+)
 from .shape_map import (
     SHAPE_ID_MAP,
     get_shape_name,
@@ -82,6 +94,14 @@ __all__ = [
     "EmblemOptimizer",
     "EmblemAIGenerator",
     
+    # AI Hermes classes
+    "AIProvider",
+    "HermesConfig",
+    "EmblemConcept",
+    "EmblemPlan",
+    "HermesClient",
+    "AIConfigManager",
+    
     # Config classes
     "ImportConfig",
     "ExportConfig",
@@ -103,6 +123,8 @@ __all__ = [
     "optimize_emblem",
     "generate_emblem_from_prompt",
     "generate_emblem_complex",
+    "generate_emblem",
+    "generate_emblem_async",
     
     # Shape map
     "SHAPE_ID_MAP",
@@ -130,6 +152,7 @@ __package_info__ = {
     ],
     "extras_require": {
         "gui": ["PySide6>=6.4"],
+        "ai": ["aiohttp>=3.8"],
         "dev": ["pytest>=7.0", "black", "mypy"],
     },
 }

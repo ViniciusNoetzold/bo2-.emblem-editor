@@ -92,12 +92,12 @@ class EmblemExporter:
     
     def export_layers(self, layers: List[EmblemLayer], 
                      slot: int = None,
-                     custom_path: Optional[Path] = None) -> Path:
+                     custom_path: Optional[str] = None) -> Path:
         """Export emblem layers to file."""
         slot = slot or self.config.slot
         
         if custom_path:
-            output_path = custom_path
+            output_path = Path(custom_path)
         else:
             output_path = self.get_emblem_path(slot)
         
@@ -124,15 +124,15 @@ class EmblemExporter:
         try:
             # Parse back
             from .parser import EmblemParser
-            parsed = EmblemParser.parse_file(str(path))
+            parsed_layers, _ = EmblemParser.parse_file(str(path))
             
             # Compare layer count
-            if len(parsed) != len([l for l in original_layers if not l.is_empty]):
+            if len(parsed_layers) != len([l for l in original_layers if not l.is_empty]):
                 return False
             
             # Compare each layer
             orig_dict = {l.index: l for l in original_layers if not l.is_empty}
-            parsed_dict = {l.index: l for l in parsed}
+            parsed_dict = {l.index: l for l in parsed_layers}
             
             if set(orig_dict.keys()) != set(parsed_dict.keys()):
                 return False
@@ -168,7 +168,8 @@ class EmblemExporter:
             return None
         
         from .parser import EmblemParser
-        return EmblemParser.parse_file(str(path))
+        layers, header = EmblemParser.parse_file(str(path))
+        return layers
     
     def delete_emblem(self, slot: int) -> bool:
         """Delete emblem from Plutonium directory."""
@@ -185,7 +186,7 @@ class EmblemExporter:
             return None
         
         from .parser import EmblemParser
-        layers = EmblemParser.parse_file(str(path))
+        layers, header = EmblemParser.parse_file(str(path))
         
         return {
             "slot": slot,

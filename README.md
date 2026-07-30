@@ -1,149 +1,65 @@
 # BO2 Emblem Studio
 
-Complete toolkit for Call of Duty: Black Ops II / Plutonium T6 emblem editing, creation, and conversion.
+**BO2 Emblem Studio** is an advanced desktop application designed for creating, editing, and managing Call of Duty: Black Ops 2 emblems. Built with a powerful AI integration, you can instantly generate complex emblems using text prompts via Nvidia NIM, OpenRouter, or your local LLM (Hermes/Ollama/LM Studio).
 
-## Features
+![BO2 Emblem Studio](https://raw.githubusercontent.com/BO2-Emblem-Studio/bo2-emblem-studio/main/assets/preview.png)
 
-- **Full Parser/Serializer** - Read/write `.emblem` and `.bin` files (1408 bytes = 32 layers × 44 bytes)
-- **Pixel-Perfect Renderer** - 260+ reference shapes from reverse engineering
-- **Image → Emblem Converter** - Import PNG, JPG, WebP, BMP, SVG
-- **Layer Optimizer** - Reduce to 32-layer limit with 95%+ fidelity
-- **AI Text-to-Emblem Generator** - Create emblems from prompts like "cat with sunglasses"
-- **Plutonium T6 Auto-Exporter** - One-click copy to `%localappdata%\Plutonium\storage\t6\players\`
-- **Modern PySide6 GUI** - Photoshop-style editor with drag-drop layers
+## 🌟 Features
 
-## Installation
+- **🎨 Advanced Layer Editor:** Full support for 32 layers with positioning, scaling, rotation, color tweaking, and flipping.
+- **🤖 AI Emblem Generator:** Just type what you want (e.g., "build an alien drinking soda") and watch the AI assemble the 32 layers automatically.
+- **☁️ Multi-Provider AI Support:** Connects directly with Nvidia API, OpenRouter, Anthropic, OpenAI, or 100% offline via Ollama/LM Studio.
+- **💾 Plutonium Integration:** Direct export and injection into your Call of Duty: Black Ops 2 (Plutonium PC) profile.
+- **🔄 Undo/Redo System:** Safe editing with full state history and clipboard support.
+
+## 🚀 Download & Installation
+
+1. Go to the [Releases](../../releases) tab.
+2. Download `BO2_Emblem_Studio_v1.0.zip`.
+3. Extract the folder anywhere on your computer.
+4. Run `BO2_Emblem_Studio.exe`.
+
+## 🧠 Using the AI Generator (Nvidia NIM)
+
+If you want to use the high-quality AI models from Nvidia for free:
+1. Go to [Nvidia Build](https://build.nvidia.com) and get your free API Key (starts with `nvapi-`).
+2. Inside BO2 Emblem Studio, click on the **AI Studio** tab.
+3. Select **Provider**: `NVIDIA`.
+4. Set **Endpoint**: `https://integrate.api.nvidia.com/v1`.
+5. Set **Model**: `nvidia/nemotron-3-ultra-550b-a55b` (or `meta/llama-3.1-70b-instruct`).
+6. Paste your **API Key**.
+7. Click **Test Connection** to verify, type your prompt, and click **Generate Emblem**!
+
+## 🖥️ Using Local AI (100% Offline & Free)
+
+If you have a good GPU and prefer to run models locally:
+1. Download and install [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.com/).
+2. Load a model and start the local server.
+3. In BO2 Emblem Studio, set the **Provider** to `LM Studio` or `Ollama`.
+4. Set the **Endpoint** to your local address (e.g., `http://localhost:1234/v1`).
+5. You don't need an API Key. Click **Generate Emblem**!
+
+## 🛠️ Development & Building from Source
+
+To build the project from source, ensure you have Python 3.11+ installed.
 
 ```bash
+# Clone the repository
+git clone https://github.com/your-username/bo2-emblem-studio.git
+cd bo2-emblem-studio
+
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### Requirements
-- Python 3.9+
-- Pillow >= 9.0
-- NumPy >= 1.21
-- SciPy >= 1.7
-- PySide6 >= 6.4 (for GUI)
-
-### Optional
-- `cairosvg` for SVG support
-
-## Quick Start
-
-### Command Line
-```python
-from bo2_emblem import load_emblem, save_emblem, render_emblem, export_to_plutonium
-
-# Load existing emblem
-layers = load_emblem("1#emblem.emblem")
-
-# Render preview
-render_emblem(layers, size=512, output_path="preview.png")
-
-# Create new emblem
-from bo2_emblem import EmblemLayer
-layers = [
-    EmblemLayer(index=0, shape_id=137, r=1.0, g=0.0, b=0.0),  # Red Half Circle
-    EmblemLayer(index=1, shape_id=217, r=0.0, g=1.0, b=0.0),  # Green Letter A
-]
-save_emblem("my_emblem.emblem", layers)
-
-# Export to Plutonium (auto-copies to game directory)
-export_to_plutonium(layers, slot=1)
-```
-
-### GUI Application
-```bash
+# Run the application
 python -m bo2_emblem.gui
+
+# Build the standalone executable
+python scripts/build.py
 ```
 
-Or run directly:
-```python
-from bo2_emblem.gui import main
-main()
-```
+## 🤝 Contributing
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
 
-## Architecture
-
-```
-bo2_emblem/
-├── parser.py       # EmblemParser, EmblemLayer
-├── serializer.py   # EmblemSerializer
-├── renderer.py     # EmblemRenderer (pixel-perfect)
-├── importer.py     # ImageImporter (PNG/JPG/WebP/BMP/SVG → layers)
-├── exporter.py     # EmblemExporter (Plutonium auto-copy)
-├── optimizer.py    # EmblemOptimizer (32-layer limit)
-├── ai.py           # EmblemAIGenerator (text → emblem)
-├── shape_map.py    # 260+ shape IDs with categories
-└── gui/            # PySide6 editor application
-```
-
-## Shape Database
-
-260+ confirmed shape IDs organized by category:
-
-| Category | IDs | Description |
-|----------|-----|-------------|
-| **tools** | 137-197 | Basic shapes (circles, squares, stars, etc.) |
-| **type** | 217-252 | Letters A-Z, Numbers 0-9 |
-| **emblems** | 38-136, 253-259 | Pre-made game icons (106 total) |
-| **ranks** | 198-216 | Military ranks (19) |
-| **gear** | 0-37, 260 | Weapon/perk qualifications (39) |
-
-## File Format
-
-BO2 emblems are 1408-byte binary blobs:
-
-```
-32 layers × 44 bytes = 1408 bytes
-
-Layer structure (44 bytes):
-- uint16 shapeId (0xFFFF = empty)
-- uint16 padding
-- float32 r, g, b, a (0.0-1.0)
-- float32 posX, posY (fraction from center, +Y = DOWN)
-- float32 scaleX, scaleY (log2 scale: true_scale = 2^value)
-- float32 rotation (degrees, clockwise)
-- uint8 outlined (bool)
-- uint8 flipped (bool)
-- uint16 padding
-```
-
-## Reverse Engineering Sources
-
-This project is based on extensive reverse engineering from:
-
-- **505e06b2/Black-Ops-2-Emblem-Editor** - Web-based editor emulator
-- **alexkotr1/bo2-emblem-toolkit** - Proxy tool with complete parser/renderer
-- **olie304/CallOfDutyEmblemSpecs** - Format specification document
-- **ogarsan/Black-Ops-2-Emblem-Master** - AI-powered fork
-- **davideloi55-prog/BO2-Emblem-Generator** - Image-to-emblem converter
-
-All sources are cloned in `research/` directory.
-
-## Documentation
-
-See `docs/reverse_engineering.md` for complete format specification.
-
-## Testing
-
-```bash
-python -m pytest tests/ -v
-```
-
-## License
-
-MIT License - see LICENSE file.
-
-## Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Add tests
-4. Submit PR
-
-## Credits
-
-Reverse engineering by the BO2/Plutonium modding community. Special thanks to:
-- 505e06b2, alexkotr1, olie304, ogarsan, davideloi55-prog
-- Plutonium T6 team for the platform
+## 📄 License
+This project is licensed under the MIT License.

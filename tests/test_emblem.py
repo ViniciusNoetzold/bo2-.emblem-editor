@@ -142,6 +142,7 @@ class TestEmblemParser(unittest.TestCase):
         """Test parsing invalid data doesn't crash."""
         layers = EmblemParser.parse_bytes(b"x" * 1408)
         self.assertIsInstance(layers, list)
+        # Should handle gracefully - either empty or some layers
     
     def test_parse_valid_1408_bytes(self):
         """Test parsing exactly 1408 bytes of valid data."""
@@ -285,8 +286,8 @@ class TestEmblemSerializer(unittest.TestCase):
             
             # Read back
             parsed = EmblemParser.parse_file(temp_path)
-            self.assertEqual(len(parsed), 1)
-            self.assertEqual(parsed[0].shape_id, 137)
+            self.assertEqual(len(parsed[0]), 1)
+            self.assertEqual(parsed[0][0].shape_id, 137)
         finally:
             os.unlink(temp_path)
 
