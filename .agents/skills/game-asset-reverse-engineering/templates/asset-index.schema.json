@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Game Asset Collection Index",
+  "description": "Schema for organizing reverse-engineered game asset collections",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["filename", "category", "title", "source_url"],
+    "properties": {
+      "filename": {
+        "type": "string",
+        "description": "Local filename (e.g., '1#emblem.emblem')",
+        "pattern": "^[0-9]+#.*\\.emblem$"
+      },
+      "category": {
+        "type": "string",
+        "enum": ["Anime", "Games", "Memes", "Logos", "Weapons", "Zombies", "Funny", "Flags", "Misc"],
+        "description": "Organizational category"
+      },
+      "title": {
+        "type": "string",
+        "description": "Human-readable name (e.g., 'Naruto Sharingan')"
+      },
+      "source_url": {
+        "type": "string",
+        "format": "uri",
+        "description": "Original download/source URL"
+      },
+      "author": {
+        "type": "string",
+        "description": "Creator username if known"
+      },
+      "sha256": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$",
+        "description": "SHA256 of the raw .emblem file for deduplication"
+      },
+      "layers_used": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 32,
+        "description": "Number of non-empty layers"
+      },
+      "shape_ids": {
+        "type": "array",
+        "items": {"type": "integer", "minimum": 0, "maximum": 65534},
+        "description": "Unique shape IDs present (excludes 0xFFFF)"
+      },
+      "dominant_categories": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["gear", "ranks", "tools", "type", "emblems"]
+        },
+        "description": "Shape categories most used"
+      },
+      "date_captured": {
+        "type": "string",
+        "format": "date-time",
+        "description": "When this file was acquired"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Any additional context"
+      }
+    }
+  }
+}

@@ -413,6 +413,7 @@ if HAS_PYSIDE6:
         ai_test_error_signal = Signal(str, str)
         ai_generation_complete_signal = Signal(list)
         ai_generation_failed_signal = Signal(str)
+        ai_generation_chunk_signal = Signal(str)
 
         def __init__(self):
             super().__init__()
@@ -437,6 +438,10 @@ if HAS_PYSIDE6:
             self.ai_test_error_signal.connect(self._test_error)
             self.ai_generation_complete_signal.connect(self._apply_generated_layers)
             self.ai_generation_failed_signal.connect(self._generation_failed)
+            self.ai_generation_chunk_signal.connect(self._on_ai_chunk_received)
+            
+            self.ai_stream_buffer = ""
+            self.ai_stream_max_layers = 32
             
             self._new_emblem()
             
@@ -749,14 +754,29 @@ if HAS_PYSIDE6:
                 QMessageBox.warning(self, "Warning", "No layers to export")
                 return
             
+            exporter = EmblemExporter()
+            existing_emblems = exporter.list_existing_emblems()
+            
+            # Find next available slot
+            next_slot = 1
+            while next_slot in existing_emblems and next_slot <= 20:
+                next_slot += 1
+                
+            if next_slot > 20:
+                QMessageBox.warning(self, "Slots Full", "All 20 emblem slots are used in Plutonium.")
+                next_slot = 20
+                
             slot, ok = QInputDialog.getInt(
                 self, "Export to Plutonium", 
-                "Enter slot number (1-20):", 1, 1, 20
+                f"Enter slot number (1-20).\nNext available slot: {next_slot}", next_slot, 1, 20
             )
             if ok:
+                if slot in existing_emblems:
+                    reply = QMessageBox.question(self, "Overwrite?", f"Slot {slot} already exists. Do you want to overwrite it?", QMessageBox.Yes | QMessageBox.No)
+                    if reply == QMessageBox.No:
+                        return
                 try:
-                    exporter = EmblemExporter()
-                    exporter.export_to_plutonium(self.layers, slot)
+                    exporter.export_layers(self.layers, slot=slot)
                     self.statusBar().showMessage(f"Exported to Plutonium slot {slot}")
                     QMessageBox.information(self, "Success", 
                         f"Emblem exported to Plutonium slot {slot}\nRestart game to see changes.")
@@ -976,6 +996,11 @@ if HAS_PYSIDE6:
             self.ai_improve.clicked.connect(self._improve_ai)
             self.ai_improve.setEnabled(False)
             btn_layout.addWidget(self.ai_improve)
+            
+            self.ai_continue = QPushButton("Continue")
+            self.ai_continue.clicked.connect(self._continue_ai)
+            self.ai_continue.setEnabled(False)
+            btn_layout.addWidget(self.ai_continue)
 
             prompt_layout.addLayout(btn_layout)
 
@@ -1065,7 +1090,7 @@ if HAS_PYSIDE6:
                         test_url,
                         json=payload,
                         headers=headers,
-                        timeout=30
+                        timeout=60
                     )
 
                     if resp.status_code == 200:
@@ -1145,19 +1170,33 @@ if HAS_PYSIDE6:
                 if not self.ai_model.text().strip():
                     self.ai_model.setText(model)
 
-        def _generate_ai_hermes(self):
+        def _generate_ai_hermes(self, is_refine=False, feedback="", is_continue=False):
             """Generate emblem using Hermes AI."""
             prompt = self.ai_prompt.toPlainText().strip()
-            if not prompt:
+            if not prompt and not (is_refine or is_continue):
                 QMessageBox.warning(self, "Warning", "Please enter a prompt")
                 return
 
             self.ai_generate.setEnabled(False)
-            self.ai_generate.setText("Generating...")
+            if not is_refine and not is_continue:
+                self.ai_generate.setText("Generating...")
             self.ai_refine.setEnabled(False)
             self.ai_recreate.setEnabled(False)
             self.ai_improve.setEnabled(False)
-            self._log_ai(f"Generating: {prompt[:50]}...")
+            self.ai_continue.setEnabled(False)
+            
+            if not is_continue:
+                self.ai_stream_buffer = ""
+            
+            if is_refine:
+                self._log_ai(f"Refining: {feedback}")
+            elif is_continue:
+                self._log_ai("Continuing generation from buffer...")
+            else:
+                self._log_ai(f"Generating: {prompt[:50]}...")
+            
+            import copy
+            current_layers_copy = copy.deepcopy(self.layers) if is_refine else None
 
             # Extract UI values on main thread!
             provider_text = self.ai_provider.currentText()
@@ -1167,6 +1206,7 @@ if HAS_PYSIDE6:
             style = self.ai_style.currentText()
             symmetry = self.ai_symmetry.currentText()
             complexity = self.ai_complexity.value()
+            max_layers = self.ai_max_layers.value()
 
             from threading import Thread
 
@@ -1205,77 +1245,131 @@ if HAS_PYSIDE6:
                         style=style,
                         symmetry=symmetry,
                         complexity=complexity,
+                        max_layers=max_layers,
                         elements=[],
                         color_scheme="auto",
                         composition_notes=""
                     )
 
+                    self.ai_stream_max_layers = max_layers
+                    
                     # Run async generation
                     import asyncio
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    from bo2_emblem.ai_hermes import generate_emblem_async
-                    plan = loop.run_until_complete(
-                        generate_emblem_async(concept, config)
-                    )
-
-                    # Convert plan to layers
-                    layers = []
-                    for i, layer_data in enumerate(plan.layers):
-                        layer = EmblemLayer(
-                            index=layer_data.get("index", i),
-                            shape_id=layer_data.get("shape_id", 192),
-                            r=layer_data.get("r", 1.0),
-                            g=layer_data.get("g", 1.0),
-                            b=layer_data.get("b", 1.0),
-                            a=layer_data.get("a", 1.0),
-                            pos_x=layer_data.get("pos_x", 0.0),
-                            pos_y=layer_data.get("pos_y", 0.0),
-                            scale_x=layer_data.get("scale_x", 0.0),
-                            scale_y=layer_data.get("scale_y", 0.0),
-                            rotation=layer_data.get("rotation", 0.0),
-                            outlined=layer_data.get("outlined", False),
-                            flipped=layer_data.get("flipped", False)
-                        )
-                        layers.append(layer)
+                    from bo2_emblem.ai_hermes import generate_emblem_stream_async
+                    
+                    async def run_stream():
+                        continue_buffer = self.ai_stream_buffer if is_continue else ""
+                        async for chunk in generate_emblem_stream_async(concept, config, current_layers_copy, feedback, continue_buffer):
+                            self.ai_generation_chunk_signal.emit(chunk)
+                            
+                    loop.run_until_complete(run_stream())
 
                     # Update UI on main thread safely
-                    self.ai_generation_complete_signal.emit(layers)
+                    self.ai_generation_complete_signal.emit([])
                     
                 except Exception as e:
-                    self.ai_log_signal.emit(f"❌ Generation failed: {str(e)}")
-                    self.ai_generation_failed_signal.emit(str(e))
+                    err_msg = str(e) if str(e) else type(e).__name__
+                    self.ai_log_signal.emit(f"❌ Generation failed: {err_msg}")
+                    self.ai_generation_failed_signal.emit(err_msg)
 
             Thread(target=generate).start()
 
-        def _apply_generated_layers(self, layers: list):
-            """Apply generated layers to editor (called on main thread)."""
-            self.layers = layers
+        def _apply_generated_layers(self, _):
+            """Generation complete (called on main thread)."""
             self._update_ui()
-            self._log_ai(f"✅ Generated {len(layers)} layers successfully!")
+            self._log_ai(f"✅ Generation complete! ({len(self.layers)} layers)")
             self.ai_refine.setEnabled(True)
             self.ai_recreate.setEnabled(True)
             self.ai_improve.setEnabled(True)
+            
+            # Allow continue if generation was truncated
+            is_incomplete = len(self.layers) < getattr(self, 'ai_stream_max_layers', 32)
+            buffer_trimmed = self.ai_stream_buffer.strip()
+            if buffer_trimmed and not buffer_trimmed.endswith('}'):
+                is_incomplete = True
+                
+            self.ai_continue.setEnabled(is_incomplete)
             self.ai_generate.setEnabled(True)
             self.ai_generate.setText("Generate Emblem")
-
-            # Render preview
-            self.ai_preview.set_layers(layers)
+            
+        def _on_ai_chunk_received(self, chunk: str):
+            """Process streamed text chunks in real-time."""
+            self.ai_stream_buffer += chunk
+            
+            # Print to log but not on every single character to avoid UI freezing
+            # In a real app we might debounce this, but appending raw text gives the 'thinking' effect.
+            scrollbar = self.ai_log.verticalScrollBar()
+            is_at_bottom = scrollbar.value() == scrollbar.maximum()
+            
+            cursor = self.ai_log.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            cursor.insertText(chunk)
+            
+            if is_at_bottom:
+                scrollbar.setValue(scrollbar.maximum())
+            
+            import re
+            # Extract layers from buffer
+            pattern = r'\{[^{}]*"index"\s*:\s*\d+[^{}]*"shape_id"\s*:\s*\d+[^}]*"flipped"\s*:\s*(?:true|false|True|False)[^}]*\}'
+            matches = re.findall(pattern, self.ai_stream_buffer)
+            
+            parsed_layers = []
+            for i, match in enumerate(matches):
+                if i >= self.ai_stream_max_layers:
+                    break
+                try:
+                    match = match.replace('True', 'true').replace('False', 'false')
+                    layer_data = json.loads(match)
+                    layer = EmblemLayer(
+                        index=layer_data.get("index", i),
+                        shape_id=layer_data.get("shape_id", 192),
+                        r=layer_data.get("r", 1.0),
+                        g=layer_data.get("g", 1.0),
+                        b=layer_data.get("b", 1.0),
+                        a=layer_data.get("a", 1.0),
+                        pos_x=layer_data.get("pos_x", 0.0),
+                        pos_y=layer_data.get("pos_y", 0.0),
+                        scale_x=layer_data.get("scale_x", 0.0),
+                        scale_y=layer_data.get("scale_y", 0.0),
+                        rotation=layer_data.get("rotation", 0.0),
+                        outlined=layer_data.get("outlined", False),
+                        flipped=layer_data.get("flipped", False)
+                    )
+                    parsed_layers.append(layer)
+                except Exception:
+                    pass
+                    
+            if parsed_layers and len(parsed_layers) > len(self.layers):
+                self.layers = parsed_layers
+                self.ai_preview.set_layers(self.layers)
 
         def _generation_failed(self, error: str):
             self.ai_generate.setEnabled(True)
             self.ai_generate.setText("Generate Emblem")
+            if self.ai_stream_buffer:
+                self.ai_continue.setEnabled(True)
             QMessageBox.critical(self, "Generation Failed", error)
+                
+        def _continue_ai(self):
+            """Continue generation from where it failed."""
+            if not self.ai_stream_buffer:
+                return
+            self._generate_ai_hermes(is_continue=True)
 
         def _refine_ai(self):
             """Refine the current generation with feedback."""
+            if not self.layers:
+                return
             feedback, ok = QInputDialog.getText(self, "Refine", "What would you like to change?")
             if ok and feedback:
-                self._log_ai(f"Refining: {feedback}")
-                # TODO: Implement refinement with feedback
+                self.ai_log.clear()
+                self._generate_ai_hermes(is_refine=True, feedback=feedback)
 
         def _recreate_ai(self):
             """Recreate with same prompt but different seed."""
+            self.ai_log.clear()
             self._log_ai("Recreating with new variation...")
             self._generate_ai_hermes()
 

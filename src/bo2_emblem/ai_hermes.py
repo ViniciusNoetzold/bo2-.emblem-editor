@@ -39,7 +39,7 @@ class HermesConfig:
     endpoint: str = "http://localhost:8080"
     api_key: str = ""
     model: str = "nemotron-3-ultra"
-    timeout: int = 60
+    timeout: int = 300
     temperature: float = 0.7
     max_tokens: int = 4096
     # Custom provider settings
@@ -56,6 +56,7 @@ class EmblemConcept:
     color_scheme: str = "auto"
     symmetry: str = "bilateral"  # bilateral, radial, asymmetric
     complexity: int = 3  # 1-5
+    max_layers: int = 32
     composition_notes: str = ""
     elements: List[str] = field(default_factory=list)
     color_palette: List[Tuple[float, float, float]] = field(default_factory=list)
@@ -79,8 +80,13 @@ class EmblemPromptBuilder:
 EMBLEM SYSTEM SPECIFICATIONS:
 - 32 layers maximum (index 0-31, lower index = further back)
 - Each layer: shape_id (0-260), color (RGBA 0-1), position (pos_x, pos_y), scale (scale_x, scale_y log2), rotation (degrees), outlined (bool), flipped (bool)
-- Coordinate system: center=(0,0), +Y=DOWN, pos 0.5 = edge of canvas
-- Scale: true_scale = 2^scale_value (0=full size, -1=half, 1=double)
+- Coordinate system: center=(0,0), +Y=DOWN, -Y=UP, -X=LEFT, +X=RIGHT. pos 0.5 = edge of canvas.
+- Scale: true_scale = 2^scale_value
+  - 0.0 = Fills the entire canvas
+  - -1.0 = Half the canvas
+  - -2.0 = Quarter of the canvas (Good for eyes, medium details)
+  - -3.0 = 1/8 of the canvas (Good for teeth, small details, thin lines)
+  - -4.0 = Tiny dots/details
 - Rotation: degrees, clockwise positive
 - Shape categories: tools (137-197), type (217-252), emblems (38-136, 253-259), gear (0-37,260), ranks (198-216)
 
@@ -89,35 +95,36 @@ KEY SHAPES:
 - 137: Half Circle (jaws, eye sockets)
 - 137 flipped: mirrored half circle
 - 185: Heart (noses, details)
-- 187: Triangle Wide (noses, teeth)
-- 195: Rectangle Medium (teeth, straight edges)
-- 183: Curved Line (cracks, details)
+- 187: Triangle Wide (noses, teeth, sharp edges)
+- 195: Rectangle Medium (teeth, straight edges, pillars)
+- 183: Curved Line (cracks, details, scars)
 - 145/146: Ninja Star/Half Star (stars, spikes)
-- 194: Diamond (eyes, geometric)
-- 192: Full Circle (eyes, base shapes)
-- 137/138: Half/Quarter Circle (organic curves)
-- 139: Half Heart (ears, details)
-- 145/146/147: Star/Shuriken variants
-- 152: Tube (cylindrical parts)
-- 195: Rectangle Medium (straight edges)
-- 196: Square Full (blocky parts)
-- 184: Smile Outline (mouth)
-- 182: Biohazard (danger symbols)
-- 187: Triangle Wide (sharp details)
+- 194: Diamond (eyes, geometric shapes)
 
-COMPOSITION PRINCIPLES:
-- Background first (index 0), foreground last (index 31)
-- Symmetrical parts use flipped=True for mirror
-- Layer order = depth order (0=back, 31=front)
-- Scale 0 = full size, negative = smaller, positive = larger
-- Position 0 = center, 0.5 = edge
-- Colors: RGB 0-1, Alpha 0-1
-- Outlined = thin stroke only
-- Flipped = horizontal mirror
+SPATIAL GUIDE FOR FACES/SKULLS:
+To make faces look beautiful and not like random cartoons, follow these realistic proportions:
+- Base Head/Cranium: Center (0, -0.05), Scale -0.4 to -0.6
+- Jaw: Lower (0, 0.2), Scale -0.8 to -1.0
+- Eyes/Eye Sockets: Placed left/right (x: +/-0.12 to 0.15, y: -0.02 to 0.05). Scale MUST be small (-1.8 to -2.5). Do not make giant cartoon eyes!
+- Nose Cavity: Center (0, 0.1), Scale -2.0 to -2.5
+- Teeth: (y: 0.18 to 0.25). Scale must be very thin (scale_x -3.0, scale_y -2.0)
+- Shading: Duplicate layers, make them slightly larger, color them black/dark gray, and put them behind the main layer.
+
+ADVANCED DESIGN TECHNIQUES (CRITICAL):
+- **NEVER generate just 3 or 4 basic shapes if complexity is 3, 4, or 5.** 
+- **Shading & Depth**: Stack multiple copies of the same shape. Put a slightly larger dark version behind a smaller bright version to create borders or shadows.
+- **Gradients & Glows**: Use overlapping circles or gradients with low alpha (e.g., a=0.2) to create glowing effects.
+- **Symmetry**: For symmetric parts (eyes, cheekbones), use exact opposite pos_x (e.g. -0.12 and 0.12) and set flipped=true for the right side.
+- **Details**: Add small details (scratches, highlights, mechanical joints) using thin rectangles or small triangles (scale -3.0).
 
 OUTPUT FORMAT:
-Return JSON with:
+CRITICAL: You MUST output ONLY a raw, valid JSON object.
+DO NOT wrap the JSON in markdown blocks (e.g. ```json).
+DO NOT include any text, conversation, or numbering outside of the JSON object.
+If you output anything other than the JSON object, the system will crash.
+Return JSON exactly in this structure. The `reasoning` field MUST be first so you can plan your layers step-by-step before generating them.
 {
+  "reasoning": "Step-by-step mathematical plan for the emblem, explaining how you will use advanced layering, shading, and how you will combine basic shapes to form the complex request. (MUST BE WRITTEN FIRST)",
   "concept": {
     "name": "name",
     "description": "visual description",
@@ -130,7 +137,6 @@ Return JSON with:
     {"index": 0, "shape_id": 192, "r":1,"g":0,"b":0,"a":1, "pos_x":0,"pos_y":0, "scale_x":0,"scale_y":0, "rotation":0, "outlined":false, "flipped":false},
     ...
   ],
-  "reasoning": "explanation of design choices",
   "estimated_layers": N,
   "warnings": []
 }"""
@@ -146,11 +152,47 @@ Description: {concept.description}
 Style: {concept.style}
 Symmetry: {concept.symmetry}
 Complexity: {concept.complexity}/5
+Max Layers: {concept.max_layers}
 Elements: {', '.join(concept.elements) if concept.elements else 'auto'}
 Color scheme: {concept.color_scheme}
 Notes: {concept.composition_notes}
 
 Return the complete emblem plan as JSON."""
+        return prompt
+
+
+    @classmethod
+    def build_refine_prompt(cls, concept: 'EmblemConcept', current_layers: List[Dict[str, Any]], feedback: str) -> str:
+        """Build a prompt to refine an existing emblem based on feedback."""
+        # Convert objects to dicts if needed
+        import copy
+        serializable_layers = []
+        for l in current_layers:
+            if hasattr(l, '__dict__'):
+                serializable_layers.append(l.__dict__)
+            else:
+                serializable_layers.append(l)
+                
+        layers_json = json.dumps(serializable_layers, indent=2)
+        
+        prompt = cls.SYSTEM_PROMPT + f"""
+
+CURRENT EMBLEM STATE:
+```json
+{layers_json}
+```
+
+USER FEEDBACK / MODIFICATION REQUEST:
+"{feedback}"
+
+Based on the current emblem state and the user's feedback, modify the emblem layers to satisfy the request. Keep the overall design intact where possible, only modifying, adding, or deleting layers necessary for the requested change.
+
+Style: {concept.style}
+Symmetry: {concept.symmetry}
+Complexity: {concept.complexity}/5
+Max Layers: {concept.max_layers}
+
+Return the complete modified emblem plan as JSON."""
         return prompt
 
 
@@ -189,6 +231,61 @@ class HermesClient:
             return await self._call_openai_compatible(prompt)
         else:
             return await self._call_custom(prompt)
+            
+    async def generate_emblem_stream(self, concept: 'EmblemConcept', current_layers: Optional[List[Any]] = None, feedback: str = "", continue_from_buffer: str = ""):
+        """Generate emblem plan progressively (streaming chunks)."""
+        if current_layers and feedback:
+            prompt = EmblemPromptBuilder.build_refine_prompt(concept, current_layers, feedback)
+        else:
+            prompt = EmblemPromptBuilder.build_prompt(concept)
+            
+        base = self.config.endpoint.rstrip('/')
+        if self.config.provider == AIProvider.OPENROUTER and not (base.endswith('/api/v1') or base.endswith('/v1')):
+            url = f"{base}/api/v1/chat/completions"
+        else:
+            url = f"{base}/chat/completions" if base.endswith('/v1') else f"{base}/v1/chat/completions"
+            
+        messages = [
+            {"role": "system", "content": EmblemPromptBuilder.SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
+        
+        if continue_from_buffer:
+            messages.append({"role": "assistant", "content": continue_from_buffer})
+            messages.append({"role": "user", "content": "Continue generating the JSON exactly from where you left off. Do not repeat what you already wrote, just output the next characters."})
+            
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "stream": True
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+            
+        if self.config.provider == AIProvider.OPENROUTER:
+            headers["HTTP-Referer"] = "https://github.com/BO2-Emblem-Studio"
+            headers["X-Title"] = "BO2 Emblem Studio"
+            
+        async with self.session.post(url, json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            async for line in resp.content:
+                if line:
+                    try:
+                        line_str = line.decode('utf-8').strip()
+                        if line_str.startswith('data: '):
+                            data_str = line_str[6:]
+                            if data_str == '[DONE]':
+                                break
+                            chunk = json.loads(data_str)
+                            delta = chunk['choices'][0].get('delta', {})
+                            if 'content' in delta:
+                                yield delta['content']
+                    except Exception:
+                        pass
     
     async def _call_local_hermes(self, prompt: str) -> 'EmblemPlan':
         """Call local Hermes Agent instance."""
@@ -459,6 +556,13 @@ class AIConfigManager:
 
 
 # Convenience functions
+async def generate_emblem_stream_async(concept: EmblemConcept, config: HermesConfig = None, current_layers: Optional[List[Any]] = None, feedback: str = "", continue_from_buffer: str = ""):
+    """Generate emblem progressively using Hermes."""
+    config = config or AIConfigManager.load()
+    async with HermesClient(config) as client:
+        async for chunk in client.generate_emblem_stream(concept, current_layers, feedback, continue_from_buffer):
+            yield chunk
+
 async def generate_emblem_async(concept: EmblemConcept, config: HermesConfig = None) -> EmblemPlan:
     """Generate emblem asynchronously using Hermes."""
     config = config or AIConfigManager.load()
@@ -487,4 +591,5 @@ __all__ = [
     'AIConfigManager',
     'generate_emblem',
     'generate_emblem_async',
+    'generate_emblem_stream_async',
 ]

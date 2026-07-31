@@ -34,6 +34,14 @@ def build():
         "--name", "BO2_Emblem_Studio",
         "--hidden-import", "aiohttp",
         "--hidden-import", "requests",
+        "--hidden-import", "bo2_emblem.parser",
+        "--hidden-import", "bo2_emblem.serializer",
+        "--hidden-import", "bo2_emblem.renderer",
+        "--hidden-import", "bo2_emblem.importer",
+        "--hidden-import", "bo2_emblem.exporter",
+        "--hidden-import", "bo2_emblem.optimizer",
+        "--hidden-import", "bo2_emblem.ai_hermes",
+        "--hidden-import", "bo2_emblem.gui.editor",
         f"--add-data={shapes_src}{os.pathsep}bo2_emblem/reference_shapes", # Copy shapes into the bundle
         str(gui_main)
     ]

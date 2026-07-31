@@ -109,7 +109,7 @@ class EmblemExporter:
             self.backup_emblem(slot)
         
         # Serialize and write
-        EmblemSerializer.write_file(str(output_path), layers)
+        EmblemSerializer.write_file_with_http_headers(str(output_path), layers)
         
         # Verify
         if self.config.verify_write:
